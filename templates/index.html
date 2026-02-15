@@ -1,0 +1,1456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audiobook Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #0a0a0c;
+            --bg-surface: #1a1a20;
+            --bg-raised: #242430;
+            --bg-hover: #2e2e3e;
+            --border: #3a3a4a;
+            --border-bright: #4a4a5a;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0c0;
+            --text-muted: #808090;
+            --accent: #f0c870;
+            --accent-dim: #d0a850;
+            --accent-glow: rgba(240, 200, 112, 0.25);
+            --success: #70d4a0;
+            --error: #f08080;
+            --folder: #80a0e0;
+            --file: #b0c0d0;
+            --studio: #d4a0f8;
+            --neural: #80c0f0;
+            --wavenet: #80f0c0;
+            --docker: #2496ed;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg-deep);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.7;
+            font-size: 16px;
+        }
+
+        /* Skip link for accessibility */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: var(--accent);
+            color: var(--bg-deep);
+            padding: 8px 16px;
+            text-decoration: none;
+            font-weight: 700;
+            z-index: 1000;
+        }
+
+        .skip-link:focus {
+            top: 0;
+        }
+
+        /* Focus styles for keyboard navigation */
+        *:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Screen reader only class */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            opacity: 0.03;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 40px 30px;
+            position: relative;
+        }
+
+        @media (min-width: 768px) {
+            .container {
+                padding: 50px 50px;
+            }
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-family: 'Instrument Serif', serif;
+            font-size: 2.5rem;
+            font-weight: 400;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+        }
+
+        @media (min-width: 768px) {
+            h1 {
+                font-size: 3.5rem;
+            }
+        }
+
+        h1 span { color: var(--accent); font-style: italic; }
+
+        .subtitle { 
+            color: var(--text-secondary); 
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        @media (min-width: 768px) {
+            .subtitle {
+                font-size: 1.2rem;
+            }
+        }
+
+        .panel {
+            background: var(--bg-surface);
+            border: 2px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            animation: fadeIn 0.4s ease backwards;
+        }
+
+        @media (min-width: 768px) {
+            .panel {
+                padding: 32px;
+            }
+        }
+
+        .panel:nth-child(2) { animation-delay: 0.1s; }
+        .panel:nth-child(3) { animation-delay: 0.2s; }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+
+        .panel-number {
+            width: 36px;
+            height: 36px;
+            background: var(--accent-glow);
+            border: 2px solid var(--accent-dim);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            color: var(--accent);
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .panel-title {
+            font-family: 'Instrument Serif', serif;
+            font-size: 1.6rem;
+            font-weight: 400;
+        }
+
+        @media (min-width: 768px) {
+            .panel-title {
+                font-size: 1.8rem;
+            }
+        }
+
+        /* Tabbed interface */
+        .voice-tabs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0;
+        }
+
+        .voice-tab {
+            background: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: var(--text-secondary);
+            padding: 12px 20px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+            top: 2px;
+            font-family: 'DM Sans', sans-serif;
+        }
+
+        .voice-tab:hover {
+            color: var(--text-primary);
+            background: var(--bg-raised);
+        }
+
+        .voice-tab:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .voice-tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+            background: var(--bg-raised);
+        }
+
+        .voice-tab-content {
+            display: none;
+        }
+
+        .voice-tab-content.active {
+            display: block;
+        }
+
+        /* Voice sections */
+        .voice-sections {
+            max-height: 600px;
+            overflow-y: auto;
+            padding-right: 12px;
+        }
+
+        @media (min-width: 768px) {
+            .voice-sections {
+                max-height: 700px;
+            }
+        }
+
+        .voice-sections::-webkit-scrollbar { 
+            width: 10px; 
+        }
+        
+        .voice-sections::-webkit-scrollbar-track { 
+            background: var(--bg-raised); 
+            border-radius: 5px; 
+        }
+        
+        .voice-sections::-webkit-scrollbar-thumb { 
+            background: var(--border-bright); 
+            border-radius: 5px; 
+        }
+        
+        .voice-sections::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-dim);
+        }
+
+        .voice-section { margin-bottom: 28px; }
+        .voice-section:last-child { margin-bottom: 0; }
+
+        .voice-section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            position: sticky;
+            top: 0;
+            background: var(--bg-surface);
+            padding: 8px 0;
+            z-index: 1;
+        }
+
+        .voice-section-label {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .voice-section-badge {
+            font-size: 0.75rem;
+            padding: 4px 10px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 600;
+        }
+
+        .badge-chirp { background: rgba(232, 196, 112, 0.2); color: var(--accent); border: 1px solid rgba(232, 196, 112, 0.4); }
+        .badge-studio { background: rgba(196, 144, 232, 0.15); color: var(--studio); border: 1px solid rgba(196, 144, 232, 0.3); }
+        .badge-neural { background: rgba(112, 176, 232, 0.15); color: var(--neural); border: 1px solid rgba(112, 176, 232, 0.3); }
+        .badge-docker { background: rgba(36, 150, 237, 0.15); color: var(--docker); border: 1px solid rgba(36, 150, 237, 0.3); }
+        .badge-wavenet { background: rgba(128, 240, 192, 0.15); color: var(--wavenet); border: 1px solid rgba(128, 240, 192, 0.3); }
+
+        .voice-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        @media (min-width: 768px) {
+            .voice-grid {
+                grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                gap: 14px;
+            }
+        }
+
+        .voice-option {
+            position: relative;
+            background: var(--bg-raised);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .voice-option.male-voice {
+            background: rgba(128, 176, 240, 0.15);
+            border-color: rgba(128, 176, 240, 0.4);
+        }
+
+        .voice-option.female-voice {
+            background: rgba(240, 168, 200, 0.15);
+            border-color: rgba(240, 168, 200, 0.4);
+        }
+
+        .voice-option:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-bright);
+            transform: translateY(-1px);
+        }
+
+        .voice-option:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .voice-option.selected {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px var(--accent-glow);
+        }
+
+        .voice-option .voice-info {
+            width: 100%;
+            min-width: 0;
+        }
+
+        .voice-option .voice-name {
+            font-size: 1rem;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .voice-option .voice-desc {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: 4px;
+        }
+
+        .voice-option .voice-actions {
+            width: 100%;
+            display: flex;
+            justify-content: flex-start;
+            margin-top: 2px;
+        }
+
+        .voice-option .play-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--bg-surface);
+            border: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1rem;
+            color: var(--text-primary);
+            font-weight: 700;
+        }
+
+        .voice-option .play-btn:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--bg-deep);
+            transform: scale(1.1);
+        }
+
+        .voice-option .play-btn:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .voice-option .play-btn.playing {
+            background: var(--error);
+            border-color: var(--error);
+            color: white;
+        }
+
+        .voice-option .voice-check {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            opacity: 0;
+            color: var(--accent);
+            transition: opacity 0.2s;
+            font-size: 1.2rem;
+            font-weight: 800;
+            pointer-events: none;
+        }
+
+        .voice-option.selected .voice-check { opacity: 1; }
+
+        /* Speed control */
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-top: 20px;
+            padding: 16px 20px;
+            background: var(--bg-raised);
+            border: 2px solid var(--border);
+            border-radius: 10px;
+        }
+
+        .speed-control label {
+            font-size: 1rem;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .speed-control input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            background: var(--border);
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+
+        .speed-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            background: var(--accent);
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid var(--bg-deep);
+        }
+
+        .speed-control input[type="range"]:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        .speed-control .speed-value {
+            min-width: 50px;
+            text-align: right;
+            font-weight: 700;
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+
+        /* File browser */
+        .browser-container {
+            background: var(--bg-raised);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .browser-path {
+            padding: 16px 20px;
+            border-bottom: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-surface);
+        }
+
+        .browser-path input {
+            flex: 1;
+            background: var(--bg-raised);
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-family: 'DM Sans', monospace;
+            font-size: 1rem;
+        }
+
+        .browser-path input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .browser-path button {
+            background: var(--accent);
+            color: var(--bg-deep);
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1rem;
+        }
+
+        .browser-path button:hover { 
+            background: var(--accent-dim);
+            transform: translateY(-1px);
+        }
+
+        .browser-path button:focus-visible {
+            outline: 3px solid var(--bg-deep);
+            outline-offset: 2px;
+        }
+
+        .browser-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        @media (min-width: 768px) {
+            .browser-list {
+                max-height: 500px;
+            }
+        }
+
+        .browser-list::-webkit-scrollbar { width: 10px; }
+        .browser-list::-webkit-scrollbar-track { background: var(--bg-raised); border-radius: 5px; }
+        .browser-list::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 5px; }
+        .browser-list::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+        .browser-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 14px 18px;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 2px solid var(--border);
+            font-size: 1rem;
+        }
+
+        .browser-item:last-child { border-bottom: none; }
+        .browser-item:hover { background: var(--bg-hover); }
+        .browser-item:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: -2px;
+        }
+        .browser-item.selected { background: var(--accent-glow); }
+
+        .browser-item .icon { font-size: 1.2rem; }
+        .browser-item .icon.folder { color: var(--folder); }
+        .browser-item .icon.file { color: var(--file); }
+        .browser-item .icon.parent { color: var(--text-secondary); }
+        .browser-item .name { flex: 1; font-weight: 500; }
+
+        .browser-item .checkbox {
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--border-bright);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+
+        .browser-item.selected .checkbox {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--bg-deep);
+        }
+
+        .selected-count {
+            padding: 16px 20px;
+            background: var(--bg-surface);
+            border-top: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .selected-count .count { color: var(--accent); font-weight: 700; font-size: 1.1rem; }
+
+        .select-buttons { display: flex; gap: 10px; }
+
+        .select-buttons button {
+            background: transparent;
+            border: 2px solid var(--border);
+            color: var(--text-secondary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .select-buttons button:hover {
+            border-color: var(--border-bright);
+            color: var(--text-primary);
+            background: var(--bg-raised);
+        }
+
+        .select-buttons button:focus-visible {
+            outline: 3px solid var(--accent);
+            outline-offset: 2px;
+        }
+
+        /* Convert button */
+        .convert-section {
+            text-align: center;
+            padding: 30px 0;
+        }
+
+        .convert-btn {
+            background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
+            color: var(--bg-deep);
+            border: none;
+            border-radius: 12px;
+            padding: 18px 60px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .convert-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 28px var(--accent-glow);
+        }
+
+        .convert-btn:focus-visible {
+            outline: 4px solid var(--bg-deep);
+            outline-offset: 3px;
+        }
+
+        .convert-btn:disabled { 
+            opacity: 0.5; 
+            cursor: not-allowed; 
+        }
+
+        /* Progress section */
+        .progress-section { display: none; }
+        .progress-section.active { display: block; }
+
+        .progress-bar-container {
+            background: var(--bg-raised);
+            border-radius: 8px;
+            height: 8px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--accent-dim) 100%);
+            border-radius: 8px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+
+        .progress-current {
+            color: var(--accent);
+            font-style: italic;
+            margin-top: 10px;
+            font-size: 1rem;
+            font-weight: 500;
+        }
+
+        .completed-list {
+            margin-top: 20px;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        @media (min-width: 768px) {
+            .completed-list {
+                max-height: 300px;
+            }
+        }
+
+        .completed-list::-webkit-scrollbar { width: 10px; }
+        .completed-list::-webkit-scrollbar-track { background: var(--bg-raised); border-radius: 5px; }
+        .completed-list::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 5px; }
+        .completed-list::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+        .completed-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 0;
+            border-bottom: 2px solid var(--border);
+            font-size: 0.95rem;
+        }
+
+        .completed-item .status-icon { font-size: 0.85rem; }
+        .completed-item.success .status-icon { color: var(--success); }
+        .completed-item.error .status-icon { color: var(--error); }
+
+        .cancel-btn {
+            background: transparent;
+            border: 1px solid var(--error);
+            color: var(--error);
+            padding: 10px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 16px;
+            transition: all 0.15s;
+        }
+
+        .cancel-btn:hover { background: rgba(224, 112, 112, 0.1); }
+        .cancel-btn.done { border-color: var(--success); color: var(--success); }
+        .cancel-btn.done:hover { background: rgba(112, 196, 160, 0.1); }
+
+        .output-folder {
+            margin-top: 12px;
+            padding: 10px 14px;
+            background: var(--bg-raised);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .output-folder strong {
+            color: var(--accent);
+            font-family: 'DM Sans', sans-serif;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .info-notice {
+            background: rgba(112, 176, 232, 0.15);
+            border: 2px solid rgba(112, 176, 232, 0.3);
+            border-radius: 10px;
+            padding: 14px 18px;
+            margin-bottom: 20px;
+            font-size: 1rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            line-height: 1.6;
+        }
+
+        .info-notice .icon { font-size: 1.3rem; flex-shrink: 0; }
+        .info-notice strong { color: var(--accent); font-weight: 600; }
+
+        .voice-count {
+            margin-left: auto;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <div class="container" id="main-content">
+        <header>
+            <h1>Audiobook <span>Generator</span></h1>
+            <p class="subtitle">Transform your manuscripts into spoken word</p>
+        </header>
+
+        <!-- Voice Selection -->
+        <div class="panel" role="region" aria-labelledby="voice-panel-title">
+            <div class="panel-header">
+                <div class="panel-number" aria-hidden="true">1</div>
+                <h2 class="panel-title" id="voice-panel-title">Select Voice</h2>
+                <span class="voice-count" id="voice-count" aria-live="polite"></span>
+            </div>
+            <div class="info-notice" role="note" aria-label="Voice selection information">
+                <span class="icon" aria-hidden="true">✨</span>
+                <span>Click ▶ to preview, ■ to stop. Includes <strong>Orpheus</strong>, <strong>Kokoro</strong>, and <strong>Piper</strong> offline neural voices (if installed), plus Google's <strong>Chirp3-HD</strong> cloud voices.</span>
+            </div>
+            <div id="voice-container" class="loading" role="status" aria-live="polite" aria-label="Loading voices">
+                <div class="spinner" aria-hidden="true"></div>
+                <p>Loading voices...</p>
+            </div>
+            <div class="speed-control" role="group" aria-label="Speech rate control">
+                <label for="rate-slider">Speed:</label>
+                <input type="range" id="rate-slider" min="0.5" max="1.5" step="0.1" value="1.0" aria-valuemin="0.5" aria-valuemax="1.5" aria-valuenow="1.0" aria-label="Speech rate">
+                <span class="speed-value" id="rate-value" aria-live="polite">1.0x</span>
+            </div>
+        </div>
+
+        <!-- File Browser -->
+        <div class="panel" role="region" aria-labelledby="file-panel-title">
+            <div class="panel-header">
+                <div class="panel-number" aria-hidden="true">2</div>
+                <h2 class="panel-title" id="file-panel-title">Choose Files</h2>
+            </div>
+            <div class="browser-container">
+                <div class="browser-path" role="search" aria-label="File browser path">
+                    <label for="path-input" class="sr-only">Folder path</label>
+                    <input type="text" id="path-input" placeholder="Enter folder path..." value="" aria-label="Enter folder path to browse">
+                    <button onclick="browsePath()" aria-label="Browse folder">Go</button>
+                </div>
+                <div id="browser-list" class="browser-list" role="listbox" aria-label="File and folder list" aria-multiselectable="true">
+                    <div class="loading" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div></div>
+                </div>
+                <div class="selected-count" role="status" aria-live="polite">
+                    <span><span class="count" id="selected-count" aria-label="Number of selected files">0</span> files selected</span>
+                    <div class="select-buttons">
+                        <button onclick="selectAll()" aria-label="Select all files">Select All</button>
+                        <button onclick="selectNone()" aria-label="Clear all selections">Clear</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Convert Section -->
+        <div class="convert-section">
+            <button class="convert-btn" id="convert-btn" onclick="startConversion()" disabled aria-label="Generate audiobook from selected files">
+                Generate Audiobook
+            </button>
+        </div>
+
+        <!-- Progress Section -->
+        <div class="panel progress-section" id="progress-section" role="region" aria-labelledby="progress-title" aria-live="polite">
+            <div class="panel-header">
+                <div class="panel-number" aria-hidden="true">✦</div>
+                <h2 class="panel-title" id="progress-title">Converting...</h2>
+            </div>
+            <div class="progress-info">
+                <span id="progress-text" aria-live="polite">0 / 0 files</span>
+                <span id="progress-percent" aria-live="polite" aria-label="Progress percentage">0%</span>
+            </div>
+            <div class="progress-bar-container" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" aria-label="Conversion progress">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <p class="progress-current" id="progress-current" aria-live="polite"></p>
+            <div class="completed-list" id="completed-list" role="log" aria-label="Completed files"></div>
+            <div class="output-folder" id="output-folder" role="status" aria-live="polite"></div>
+            <button class="cancel-btn" id="cancel-btn" onclick="cancelConversion()" aria-label="Cancel conversion">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // Load saved voice from localStorage, fallback to default
+        let selectedVoiceId = localStorage.getItem('audiobook_selected_voice') || 'en-GB-Chirp3-HD-Enceladus';
+        let selectedFiles = new Set();
+        let currentPath = '';
+        let currentItems = [];
+        let speakingRate = 1.0;
+
+        // Audio preview - single audio element for all previews
+        const previewAudio = new Audio();
+        let currentVoiceId = null;
+        let isLoading = false;
+
+        // Cleanup function
+        function stopPreview() {
+            previewAudio.pause();
+            previewAudio.currentTime = 0;
+            previewAudio.src = '';
+            
+            // Reset all play buttons
+            document.querySelectorAll('.play-btn').forEach(btn => {
+                btn.classList.remove('playing');
+                btn.textContent = '▶';
+                btn.style.animation = '';
+            });
+            
+            currentVoiceId = null;
+            isLoading = false;
+        }
+
+        document.getElementById('rate-slider').addEventListener('input', (e) => {
+            speakingRate = parseFloat(e.target.value);
+            document.getElementById('rate-value').textContent = speakingRate.toFixed(1) + 'x';
+        });
+
+        async function loadVoices() {
+            try {
+                const response = await fetch('/api/voices');
+                const voices = await response.json();
+                renderVoices(voices);
+                
+                // After rendering, restore selection from localStorage if voice exists
+                const savedVoiceId = localStorage.getItem('audiobook_selected_voice');
+                if (savedVoiceId) {
+                    const savedVoiceElement = document.querySelector(`[data-voice-id="${savedVoiceId}"]`);
+                    if (savedVoiceElement) {
+                        selectVoice(savedVoiceId, savedVoiceElement);
+                        // Scroll the selected voice into view
+                        savedVoiceElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }
+                }
+            } catch (error) {
+                document.getElementById('voice-container').innerHTML = 
+                    '<p style="color: var(--error)">Failed to load voices</p>';
+            }
+        }
+
+        function renderVoices(voiceGroups) {
+            const container = document.getElementById('voice-container');
+            let totalVoices = 0;
+            
+            // Group voices into tabs
+            const tabGroups = [
+                {
+                    tabId: 'docker',
+                    tabLabel: 'Docker TTS',
+                    sections: [
+                        { key: 'docker_tts', label: '🐳 Docker TTS (Kani, etc.)', badge: 'docker', badgeText: 'Docker' },
+                    ]
+                },
+                {
+                    tabId: 'orpheus',
+                    tabLabel: 'Orpheus (LLM TTS)',
+                    sections: [
+                        { key: 'orpheus_offline', label: '🦜 Orpheus (LLM-based TTS)', badge: 'neural', badgeText: 'LLM Offline' },
+                    ]
+                },
+                {
+                    tabId: 'kokoro',
+                    tabLabel: 'Kokoro (Offline Neural)',
+                    sections: [
+                        { key: 'kokoro_offline', label: '🎛️ Kokoro (Offline Neural)', badge: 'neural', badgeText: 'Neural Offline' },
+                    ]
+                },
+                {
+                    tabId: 'piper',
+                    tabLabel: 'Piper (Offline Neural)',
+                    sections: [
+                        { key: 'piper_offline', label: '🐦 Piper (Offline Neural)', badge: 'neural', badgeText: 'Neural Offline' },
+                    ]
+                },
+                {
+                    tabId: 'chirp3',
+                    tabLabel: 'Chirp3-HD (Cloud)',
+                    sections: [
+                        { key: 'chirp3_us', label: '🇺🇸 American English', badge: 'chirp', badgeText: '✨ Chirp3-HD' },
+                        { key: 'chirp3_uk', label: '🇬🇧 British English', badge: 'chirp', badgeText: '✨ Chirp3-HD' },
+                        { key: 'chirp3_au', label: '🇦🇺 Australian English', badge: 'chirp', badgeText: '✨ Chirp3-HD' },
+                        { key: 'chirp3_in', label: '🇮🇳 Indian English', badge: 'chirp', badgeText: '✨ Chirp3-HD' },
+                    ]
+                },
+                {
+                    tabId: 'premium',
+                    tabLabel: 'Premium Voices',
+                    sections: [
+                        { key: 'studio', label: '🎙️ Studio Quality', badge: 'studio', badgeText: '★ Premium' },
+                        { key: 'neural2', label: '🔷 Neural2 Voices', badge: 'neural', badgeText: 'Neural2' },
+                        { key: 'wavenet', label: '🌊 WaveNet Voices', badge: 'wavenet', badgeText: 'Budget' },
+                    ]
+                }
+            ];
+            
+            // Build tabs HTML
+            let tabsHtml = '<div class="voice-tabs" role="tablist" aria-label="Voice type selection">';
+            let contentHtml = '';
+            let firstTab = true;
+            
+            for (const tabGroup of tabGroups) {
+                // Count voices in this tab
+                let tabVoiceCount = 0;
+                for (const section of tabGroup.sections) {
+                if (voiceGroups[section.key] && voiceGroups[section.key].length > 0) {
+                        tabVoiceCount += voiceGroups[section.key].length;
+                    }
+                }
+                
+                if (tabVoiceCount === 0) continue; // Skip empty tabs
+                
+                totalVoices += tabVoiceCount;
+                const tabId = `tab-${tabGroup.tabId}`;
+                const contentId = `content-${tabGroup.tabId}`;
+                
+                // Tab button
+                tabsHtml += `<button class="voice-tab ${firstTab ? 'active' : ''}" 
+                    role="tab" 
+                    aria-selected="${firstTab ? 'true' : 'false'}" 
+                    aria-controls="${contentId}"
+                    id="${tabId}"
+                    onclick="switchTab('${tabGroup.tabId}')"
+                    tabindex="${firstTab ? '0' : '-1'}">${tabGroup.tabLabel} (${tabVoiceCount})</button>`;
+                
+                // Tab content
+                contentHtml += `<div id="${contentId}" 
+                    class="voice-tab-content ${firstTab ? 'active' : ''}" 
+                    role="tabpanel" 
+                    aria-labelledby="${tabId}"
+                    ${firstTab ? '' : 'hidden'}>`;
+                contentHtml += '<div class="voice-sections">';
+                
+                for (const section of tabGroup.sections) {
+                    if (voiceGroups[section.key] && voiceGroups[section.key].length > 0) {
+                        const isPiper = section.key === 'piper_offline';
+                        contentHtml += renderVoiceSection(section.label, section.badge, section.badgeText, voiceGroups[section.key], isPiper);
+                }
+            }
+            
+                contentHtml += '</div></div>';
+                firstTab = false;
+            }
+            
+            tabsHtml += '</div>';
+            
+            container.innerHTML = tabsHtml + contentHtml;
+            document.getElementById('voice-count').textContent = `${totalVoices} voices`;
+        }
+
+        function switchTab(tabId) {
+            // Hide all tab contents
+            document.querySelectorAll('.voice-tab-content').forEach(content => {
+                content.classList.remove('active');
+                content.setAttribute('hidden', '');
+            });
+            
+            // Remove active state from all tabs
+            document.querySelectorAll('.voice-tab').forEach(tab => {
+                tab.classList.remove('active');
+                tab.setAttribute('aria-selected', 'false');
+                tab.setAttribute('tabindex', '-1');
+            });
+            
+            // Show selected tab content
+            const content = document.getElementById(`content-${tabId}`);
+            const tab = document.getElementById(`tab-${tabId}`);
+            
+            if (content && tab) {
+                content.classList.add('active');
+                content.removeAttribute('hidden');
+                tab.classList.add('active');
+                tab.setAttribute('aria-selected', 'true');
+                tab.setAttribute('tabindex', '0');
+                tab.focus();
+            }
+        }
+
+        // Keyboard navigation for tabs
+        document.addEventListener('DOMContentLoaded', function() {
+            document.addEventListener('keydown', function(e) {
+                const tabs = Array.from(document.querySelectorAll('.voice-tab'));
+                const activeTab = tabs.find(tab => tab.classList.contains('active'));
+                
+                if (!activeTab) return;
+                
+                const currentIndex = tabs.indexOf(activeTab);
+                let targetIndex = -1;
+                
+                if (e.key === 'ArrowLeft' && currentIndex > 0) {
+                    targetIndex = currentIndex - 1;
+                } else if (e.key === 'ArrowRight' && currentIndex < tabs.length - 1) {
+                    targetIndex = currentIndex + 1;
+                } else if (e.key === 'Home') {
+                    targetIndex = 0;
+                } else if (e.key === 'End') {
+                    targetIndex = tabs.length - 1;
+                }
+                
+                if (targetIndex !== -1) {
+                    e.preventDefault();
+                    const targetTab = tabs[targetIndex];
+                    const tabId = targetTab.id.replace('tab-', '');
+                    switchTab(tabId);
+                }
+            });
+        });
+
+        function renderVoiceSection(title, badgeType, badgeText, voices, isPiper = false) {
+            let html = `
+                <div class="voice-section">
+                    <div class="voice-section-header">
+                        <span class="voice-section-label">${title}</span>
+                        <span class="voice-section-badge badge-${badgeType}">${badgeText}</span>
+                    </div>
+                    <div class="voice-grid" role="group" aria-label="${title} voices">`;
+            
+            for (const voice of voices) {
+                const isSelected = voice.id === selectedVoiceId;
+                const genderRaw = (voice.gender || '').toString().toUpperCase();
+                const isMale = genderRaw === 'MALE';
+                const isFemale = genderRaw === 'FEMALE';
+                const genderText = isMale ? 'Male' : isFemale ? 'Female' : 'Neutral';
+                const genderClass = isMale ? 'male-voice' : isFemale ? 'female-voice' : '';
+                const descText = isPiper ? '' : voice.desc;
+                const ariaDesc = descText ? `, ${descText}` : '';
+                html += `
+                    <div class="voice-option ${genderClass} ${isSelected ? 'selected' : ''}" 
+                         data-voice-id="${voice.id}"
+                         role="option"
+                         aria-selected="${isSelected}"
+                         aria-label="${voice.name}, ${genderText} voice${ariaDesc}"
+                         tabindex="0"
+                         onclick="selectVoice('${voice.id}', this)"
+                         onkeydown="handleVoiceKeydown(event, '${voice.id}', this)">
+                        <div class="voice-info">
+                            <div class="voice-name">${voice.name}</div>
+                            ${descText ? `<div class="voice-desc">${descText}</div>` : ''}
+                        </div>
+                        <div class="voice-actions">
+                            <button class="play-btn" 
+                                data-voice="${voice.id}" 
+                                onclick="event.stopPropagation(); togglePreview('${voice.id}', this)" 
+                                onkeydown="handlePlayButtonKeydown(event, '${voice.id}', this)"
+                                aria-label="Preview ${voice.name} voice"
+                                title="Preview voice">▶</button>
+                        </div>
+                        <span class="voice-check" aria-hidden="true">✓</span>
+                    </div>`;
+            }
+            
+            html += '</div></div>';
+            return html;
+        }
+
+        function handleVoiceKeydown(event, voiceId, element) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                selectVoice(voiceId, element);
+            }
+        }
+
+        function handlePlayButtonKeydown(event, voiceId, button) {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                event.stopPropagation();
+                togglePreview(voiceId, button);
+            }
+        }
+
+        function selectVoice(voiceId, element) {
+            selectedVoiceId = voiceId;
+            // Save to localStorage
+            localStorage.setItem('audiobook_selected_voice', voiceId);
+            
+            document.querySelectorAll('.voice-option').forEach(el => {
+                el.classList.remove('selected');
+                el.setAttribute('aria-selected', 'false');
+            });
+            element.classList.add('selected');
+            element.setAttribute('aria-selected', 'true');
+        }
+
+        function togglePreview(voiceId, btn) {
+            // If clicking the same voice that's playing or loading, stop it
+            if (currentVoiceId === voiceId) {
+                stopPreview();
+                return;
+            }
+            
+            // Stop any current playback first
+            stopPreview();
+            
+            // Mark as loading
+            isLoading = true;
+            currentVoiceId = voiceId;
+            btn.textContent = '⏳';
+            btn.style.animation = 'pulse 1s infinite';
+
+            // Set up the audio
+            previewAudio.src = `/api/preview/${encodeURIComponent(voiceId)}`;
+            
+            previewAudio.oncanplaythrough = function() {
+                if (currentVoiceId === voiceId && isLoading) {
+                    isLoading = false;
+                    btn.classList.add('playing');
+                    btn.textContent = '■';
+                    btn.style.animation = '';
+                    previewAudio.play().catch(() => {
+                        stopPreview();
+                    });
+                }
+            };
+
+            previewAudio.onended = function() {
+                if (currentVoiceId === voiceId) {
+                    btn.classList.remove('playing');
+                    btn.textContent = '▶';
+                    currentVoiceId = null;
+                }
+            };
+
+            previewAudio.onerror = function() {
+                if (currentVoiceId === voiceId) {
+                    stopPreview();
+                    alert('Failed to load preview');
+                }
+            };
+
+            previewAudio.load();
+        }
+
+        // File browser
+        async function browsePath(path) {
+            const pathInput = document.getElementById('path-input');
+            path = path || pathInput.value;
+            
+            try {
+                const response = await fetch('/api/browse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                
+                if (data.type === 'drives') {
+                    renderDrives(data.items);
+                } else {
+                    currentPath = data.current;
+                    pathInput.value = currentPath;
+                    renderBrowser(data);
+                }
+            } catch (error) {
+                console.error('Browse error:', error);
+            }
+        }
+
+        function renderDrives(drives) {
+            document.getElementById('browser-list').innerHTML = drives.map(drive => `
+                <div class="browser-item" 
+                    role="option"
+                    tabindex="0"
+                    aria-label="Drive: ${drive}"
+                    ondblclick="browsePath('${drive.replace(/\\/g, '\\\\')}')"
+                    onkeydown="if(event.key==='Enter') browsePath('${drive.replace(/\\/g, '\\\\')}')">
+                    <span class="icon folder" aria-hidden="true">💾</span>
+                    <span class="name">${drive}</span>
+                </div>`).join('');
+        }
+
+        function renderBrowser(data) {
+            const container = document.getElementById('browser-list');
+            currentItems = data.items;
+            let html = '';
+            
+            if (data.parent) {
+                html += `<div class="browser-item" 
+                    role="option"
+                    tabindex="0"
+                    aria-label="Go to parent folder"
+                    ondblclick="browsePath('${data.parent.replace(/\\/g, '\\\\')}')"
+                    onkeydown="if(event.key==='Enter') browsePath('${data.parent.replace(/\\/g, '\\\\')}')">
+                    <span class="icon parent" aria-hidden="true">⬆</span><span class="name">..</span></div>`;
+            }
+            
+            for (const item of data.items) {
+                if (item.type === 'folder') {
+                    html += `<div class="browser-item" 
+                        role="option"
+                        tabindex="0"
+                        aria-label="Folder: ${item.name}"
+                        ondblclick="browsePath('${item.path.replace(/\\/g, '\\\\')}')"
+                        onkeydown="if(event.key==='Enter') browsePath('${item.path.replace(/\\/g, '\\\\')}')">
+                        <span class="icon folder" aria-hidden="true">📁</span><span class="name">${item.name}</span></div>`;
+                } else {
+                    const isSelected = selectedFiles.has(item.path);
+                    html += `<div class="browser-item ${isSelected ? 'selected' : ''}" 
+                         role="option"
+                         aria-selected="${isSelected}"
+                         aria-label="File: ${item.name}${isSelected ? ', selected' : ''}"
+                         tabindex="0"
+                         onclick="toggleFile('${item.path.replace(/\\/g, '\\\\')}', this)"
+                         onkeydown="if(event.key==='Enter' || event.key===' ') { event.preventDefault(); toggleFile('${item.path.replace(/\\/g, '\\\\')}', this); }">
+                        <span class="icon file" aria-hidden="true">📄</span><span class="name">${item.name}</span>
+                        <div class="checkbox" aria-hidden="true">${isSelected ? '✓' : ''}</div></div>`;
+                }
+            }
+            
+            container.innerHTML = html || '<div class="loading" role="status">No text files found</div>';
+            updateSelectedCount();
+        }
+
+        function toggleFile(path, element) {
+            if (selectedFiles.has(path)) {
+                selectedFiles.delete(path);
+                element.classList.remove('selected');
+                element.setAttribute('aria-selected', 'false');
+                element.setAttribute('aria-label', element.querySelector('.name').textContent.replace(/^File: /, 'File: '));
+                element.querySelector('.checkbox').textContent = '';
+            } else {
+                selectedFiles.add(path);
+                element.classList.add('selected');
+                element.setAttribute('aria-selected', 'true');
+                const fileName = element.querySelector('.name').textContent;
+                element.setAttribute('aria-label', `File: ${fileName}, selected`);
+                element.querySelector('.checkbox').textContent = '✓';
+            }
+            updateSelectedCount();
+        }
+
+        function selectAll() {
+            currentItems.filter(i => i.type === 'file').forEach(item => selectedFiles.add(item.path));
+            browsePath(currentPath);
+        }
+
+        function selectNone() {
+            selectedFiles.clear();
+            browsePath(currentPath);
+        }
+
+        function updateSelectedCount() {
+            document.getElementById('selected-count').textContent = selectedFiles.size;
+            document.getElementById('convert-btn').disabled = selectedFiles.size === 0;
+        }
+
+        async function startConversion() {
+            const files = Array.from(selectedFiles).sort();
+            
+            try {
+                const response = await fetch('/api/convert', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        files: files,
+                        voice: selectedVoiceId,
+                        output_folder: currentPath,
+                        rate: speakingRate
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.error) { alert(data.error); return; }
+                
+                document.getElementById('progress-section').classList.add('active');
+                document.getElementById('convert-btn').disabled = true;
+                document.getElementById('progress-title').textContent = 'Converting...';
+                document.getElementById('cancel-btn').textContent = 'Cancel';
+                document.getElementById('cancel-btn').classList.remove('done');
+                document.getElementById('cancel-btn').onclick = cancelConversion;
+                document.getElementById('output-folder').innerHTML = `<strong>Output:</strong> ${data.output_folder}`;
+                
+                pollProgress();
+            } catch (error) {
+                alert('Failed to start conversion');
+            }
+        }
+
+        async function pollProgress() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                
+                const percent = status.total > 0 ? Math.round((status.progress / status.total) * 100) : 0;
+                
+                const progressBar = document.getElementById('progress-bar');
+                const progressContainer = progressBar.parentElement;
+                progressBar.style.width = percent + '%';
+                progressContainer.setAttribute('aria-valuenow', percent);
+                progressContainer.setAttribute('aria-label', `Conversion progress: ${percent}%`);
+                
+                document.getElementById('progress-percent').textContent = percent + '%';
+                document.getElementById('progress-text').textContent = `${status.progress} / ${status.total} files`;
+                document.getElementById('progress-current').textContent = 
+                    status.current_file ? `Converting: ${status.current_file}` : '';
+                
+                let completedHtml = status.completed.map(item => 
+                    `<div class="completed-item success" role="listitem"><span class="status-icon" aria-hidden="true">✓</span><span>${item.input} → ${item.output}</span></div>`
+                ).join('');
+                completedHtml += status.errors.map(item => 
+                    `<div class="completed-item error" role="listitem"><span class="status-icon" aria-hidden="true">✗</span><span>${item.file}: ${item.error}</span></div>`
+                ).join('');
+                document.getElementById('completed-list').innerHTML = completedHtml;
+                
+                if (status.running) {
+                    setTimeout(pollProgress, 500);
+                } else {
+                    const cancelBtn = document.getElementById('cancel-btn');
+                    cancelBtn.textContent = 'Done';
+                    cancelBtn.classList.add('done');
+                    cancelBtn.onclick = () => {
+                        document.getElementById('progress-section').classList.remove('active');
+                        document.getElementById('convert-btn').disabled = selectedFiles.size === 0;
+                    };
+                    document.getElementById('progress-title').textContent = 
+                        status.cancelled ? 'Cancelled' : 'Complete! 🎉';
+                }
+            } catch (error) {
+                setTimeout(pollProgress, 1000);
+            }
+        }
+
+        async function cancelConversion() {
+            await fetch('/api/cancel', { method: 'POST' });
+        }
+
+        document.getElementById('path-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') browsePath();
+        });
+
+        loadVoices();
+        browsePath('');
+    </script>
+</body>
+</html>
