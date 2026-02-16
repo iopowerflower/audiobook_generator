@@ -17,15 +17,6 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Check for GPU support
-GPU_FLAG=""
-if docker info 2>/dev/null | grep -q "Runtimes:.*nvidia"; then
-    GPU_FLAG="--gpus all"
-    echo "NVIDIA GPU support detected"
-else
-    echo "Warning: No NVIDIA GPU support detected. Kani TTS will run on CPU (slow)."
-fi
-
 # Stop any existing containers
 echo "Stopping any existing Kani containers..."
 docker stop kani-hf 2>/dev/null || true
@@ -33,13 +24,24 @@ docker stop kani-proxy 2>/dev/null || true
 
 # Start the HuggingFace Space container
 echo "Starting Kani TTS (HuggingFace Space)..."
-docker run -d --rm \
+# Try GPU first; if it fails, automatically fall back to CPU.
+if docker run -d --rm \
     --name kani-hf \
     --platform linux/amd64 \
     -p 7860:7860 \
-    $GPU_FLAG \
+    --gpus all \
     registry.hf.space/nineninesix-kani-tts-2-pt:latest \
-    python app.py
+    python app.py; then
+    echo "NVIDIA GPU mode enabled (--gpus all)."
+else
+    echo "Warning: GPU launch failed, falling back to CPU mode."
+    docker run -d --rm \
+        --name kani-hf \
+        --platform linux/amd64 \
+        -p 7860:7860 \
+        registry.hf.space/nineninesix-kani-tts-2-pt:latest \
+        python app.py
+fi
 
 echo "Waiting for container to start..."
 sleep 5
