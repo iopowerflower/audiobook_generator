@@ -1,0 +1,23 @@
+# Lightweight Gradio Proxy for Kani TTS 2 - English Accents (kani-en)
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn[standard] \
+    gradio_client \
+    soundfile \
+    numpy \
+    httpx \
+    python-multipart
+
+COPY gradio_proxy.py /app/
+
+EXPOSE 7862
+
+ENV PORT=7862
+ENV GRADIO_URL=http://kani-en-hf:7860
+
+CMD ["python", "gradio_proxy.py"]

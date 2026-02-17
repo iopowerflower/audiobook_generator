@@ -9,6 +9,7 @@ A multi-engine text-to-speech application for generating high-quality audiobooks
   - **Kokoro**: Offline neural TTS with high-quality voices
   - **Piper**: Fast, lightweight offline TTS
   - **Orpheus**: LLM-based TTS with emotion support
+  - **Pocket TTS**: Lightweight CPU TTS with voice cloning (Kyutai)
   - **Docker backends**: Extensible support for containerized TTS engines (Kani, etc.)
 
 - **Voice Preview & Selection**: Audition voices before generating your audiobook
@@ -83,6 +84,28 @@ All offline engines work without API keys or internet:
 - **Kokoro**: See [README_kokoro.md](README_kokoro.md) for model download instructions
 - **Piper**: See [README_piper.md](README_piper.md) for voice installation
 - **Orpheus**: See [README_orpheus.md](README_orpheus.md) for setup and emotion tags
+- **Pocket TTS**: See [Pocket TTS Setup](#pocket-tts-setup) below for voice cloning and HF voices
+
+#### Pocket TTS Setup
+
+Pocket TTS provides **8 built-in voices** that work immediately without any setup:
+- alba, marius, javert, jean, fantine, cosette, eponine, azelma
+
+For **voice cloning** and **44 additional HuggingFace voices**, you need to:
+
+1. Accept the terms at https://huggingface.co/kyutai/pocket-tts
+2. Run from the venv:
+   ```bash
+   .venv/Scripts/python.exe -c "from huggingface_hub import login; login()"
+   ```
+   Or use the CLI (may have issues on Windows):
+   ```bash
+   huggingface-cli login
+   ```
+3. Restart the app — the HF voices and clone UI will appear automatically
+
+**Without HF auth**: 8 preset voices work perfectly  
+**With HF auth**: 52 voices + voice cloning from any audio file
 
 ### Docker Backends (Advanced)
 

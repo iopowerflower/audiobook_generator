@@ -303,6 +303,30 @@
         .badge-docker { background: rgba(36, 150, 237, 0.15); color: var(--docker); border: 1px solid rgba(36, 150, 237, 0.3); }
         .badge-wavenet { background: rgba(128, 240, 192, 0.15); color: var(--wavenet); border: 1px solid rgba(128, 240, 192, 0.3); }
 
+        .docker-panel { margin-bottom: 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-raised); }
+        .docker-panel-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: none; border: none; color: var(--text-primary); font: inherit; cursor: pointer; text-align: left; }
+        .docker-panel-toggle:hover { background: var(--bg-hover); }
+        .docker-panel-title { font-weight: 600; }
+        .docker-panel-chevron { transition: transform 0.2s; }
+        .docker-panel-toggle[aria-expanded="true"] .docker-panel-chevron { transform: rotate(180deg); }
+        .docker-panel-content { padding: 0 16px 16px; }
+        .docker-panel-hint { color: var(--text-muted); font-size: 0.9em; margin-bottom: 12px; }
+        .docker-backends-list { display: flex; flex-direction: column; gap: 10px; }
+        .docker-backend-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--bg-surface); border-radius: 6px; }
+        .docker-backend-status { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .docker-backend-status.running { background: var(--success); }
+        .docker-backend-status.stopped { background: var(--text-muted); }
+        .docker-backend-status.starting { background: #e6c84a; animation: pulse 1.5s infinite; }
+        .docker-backend-info { flex: 1; min-width: 0; }
+        .docker-backend-name { font-weight: 500; }
+        .docker-backend-meta { font-size: 0.85em; color: var(--text-muted); }
+        .docker-backend-actions { display: flex; gap: 8px; }
+        .docker-backend-actions button { padding: 6px 12px; font-size: 0.9em; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-raised); color: var(--text-primary); cursor: pointer; }
+        .docker-backend-actions button:hover { background: var(--bg-hover); }
+        .docker-backend-actions button.primary { background: var(--accent); color: var(--bg-deep); border-color: var(--accent); }
+        .docker-backend-actions button.primary:hover { background: var(--accent-dim); }
+        .docker-backend-actions button:disabled { opacity: 0.6; cursor: not-allowed; }
+
         .voice-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -833,7 +857,51 @@
             </div>
             <div class="info-notice" role="note" aria-label="Voice selection information">
                 <span class="icon" aria-hidden="true">✨</span>
-                <span>Click ▶ to preview, ■ to stop. Includes <strong>Orpheus</strong>, <strong>Kokoro</strong>, and <strong>Piper</strong> offline neural voices (if installed), plus Google's <strong>Chirp3-HD</strong> cloud voices.</span>
+                <span>Click ▶ to preview, ■ to stop. Includes <strong>Orpheus</strong>, <strong>Kokoro</strong>, <strong>Piper</strong>, and <strong>Pocket TTS</strong> offline neural voices (if installed), plus Google's <strong>Chirp3-HD</strong> cloud voices.</span>
+            </div>
+            <div id="pocket-clone-section" class="pocket-clone-section" style="display:none; margin-bottom: 14px; padding: 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-raised);">
+                <p class="docker-panel-hint" style="margin-bottom:8px"><strong>🎧 Pocket TTS Voice Cloning</strong> — Upload audio to clone a voice (min ~1 s). No Docker needed.</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                    <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px">
+                        <span style="font-size:0.85em;color:var(--text-muted)">Voice name</span>
+                        <input type="text" id="pocket-clone-name" placeholder="My Voice" style="padding:6px 8px;border-radius:4px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary)">
+                    </label>
+                    <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
+                        <span style="font-size:0.85em;color:var(--text-muted)">Audio file</span>
+                        <input type="file" id="pocket-clone-audio" accept="audio/*" style="font-size:0.85em">
+                    </label>
+                    <button id="pocket-clone-btn" onclick="submitPocketVoiceClone()" style="padding:6px 14px;white-space:nowrap">Clone</button>
+                </div>
+                <p id="pocket-clone-status" class="docker-panel-hint" style="margin-top:6px"></p>
+            </div>
+            <div class="docker-panel" id="docker-panel" role="region" aria-label="Docker TTS backends">
+                <button class="docker-panel-toggle" id="docker-panel-toggle" aria-expanded="false" aria-controls="docker-panel-content" onclick="toggleDockerPanel()">
+                    <span class="docker-panel-title">Docker TTS Backends</span>
+                    <span class="docker-panel-chevron" aria-hidden="true">▼</span>
+                </button>
+                <div class="docker-panel-content" id="docker-panel-content" hidden>
+                    <p class="docker-panel-hint">Start a backend to load its voices into the Docker TTS tab.</p>
+                    <div id="docker-backends-list" class="docker-backends-list"></div>
+                    <div id="docker-clone-section" class="docker-clone-section" style="display:none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-color);">
+                        <p class="docker-panel-hint" style="margin-bottom:8px"><strong>Docker Voice Cloning</strong> — Upload audio to clone a voice (min 1 s).</p>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+                            <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px">
+                                <span style="font-size:0.85em;color:var(--text-muted)">Backend</span>
+                                <select id="clone-backend-select" style="padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-surface);color:var(--text-primary)"></select>
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px">
+                                <span style="font-size:0.85em;color:var(--text-muted)">Voice name</span>
+                                <input type="text" id="clone-voice-name" placeholder="My Voice" style="padding:6px 8px;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-surface);color:var(--text-primary)">
+                            </label>
+                            <label style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:160px">
+                                <span style="font-size:0.85em;color:var(--text-muted)">Audio file</span>
+                                <input type="file" id="clone-audio-file" accept="audio/*" style="font-size:0.85em">
+                            </label>
+                            <button id="clone-submit-btn" onclick="submitVoiceClone()" style="padding:6px 14px;white-space:nowrap">Clone</button>
+                        </div>
+                        <p id="clone-status" class="docker-panel-hint" style="margin-top:6px"></p>
+                    </div>
+                </div>
             </div>
             <div id="voice-container" class="loading" role="status" aria-live="polite" aria-label="Loading voices">
                 <div class="spinner" aria-hidden="true"></div>
@@ -933,6 +1001,170 @@
             document.getElementById('rate-value').textContent = speakingRate.toFixed(1) + 'x';
         });
 
+        function toggleDockerPanel() {
+            const btn = document.getElementById('docker-panel-toggle');
+            const content = document.getElementById('docker-panel-content');
+            const expanded = btn.getAttribute('aria-expanded') === 'true';
+            btn.setAttribute('aria-expanded', !expanded);
+            content.hidden = expanded;
+            if (!expanded) loadDockerBackends();
+        }
+
+        async function loadDockerBackends() {
+            const list = document.getElementById('docker-backends-list');
+            try {
+                const res = await fetch('/api/docker/backends');
+                const data = await res.json();
+                list.innerHTML = data.backends.map(b => `
+                    <div class="docker-backend-row" data-backend-id="${b.id}">
+                        <span class="docker-backend-status ${b.available ? 'running' : 'stopped'}" aria-label="${b.available ? 'Running' : 'Stopped'}"></span>
+                        <div class="docker-backend-info">
+                            <div class="docker-backend-name">${b.name}</div>
+                            <div class="docker-backend-meta">${b.available ? b.voice_count + ' voices' : 'Stopped'} · port ${b.port}</div>
+                        </div>
+                        <div class="docker-backend-actions">
+                            ${b.available
+                                ? `<button onclick="stopDockerBackend('${b.id}', this)">Stop</button>`
+                                : `<button class="primary" onclick="startDockerBackend('${b.id}', this)">Start</button>`
+                            }
+                            ${b.available ? `<button onclick="refreshDockerBackend('${b.id}', this)">Refresh</button>` : ''}
+                        </div>
+                    </div>
+                `).join('');
+
+                // Update voice cloning section
+                const runningBackends = data.backends.filter(b => b.available);
+                const cloneSection = document.getElementById('docker-clone-section');
+                const cloneSelect = document.getElementById('clone-backend-select');
+                if (runningBackends.length > 0) {
+                    cloneSection.style.display = '';
+                    cloneSelect.innerHTML = runningBackends.map(b =>
+                        `<option value="${b.id}">${b.name}</option>`
+                    ).join('');
+                } else {
+                    cloneSection.style.display = 'none';
+                }
+            } catch (e) {
+                list.innerHTML = '<p class="docker-panel-hint">Docker backends unavailable.</p>';
+            }
+        }
+
+        async function submitPocketVoiceClone() {
+            const name = document.getElementById('pocket-clone-name').value.trim();
+            const fileInput = document.getElementById('pocket-clone-audio');
+            const status = document.getElementById('pocket-clone-status');
+            const btn = document.getElementById('pocket-clone-btn');
+
+            if (!name || !fileInput.files.length) {
+                status.textContent = 'Please enter a name and select an audio file.';
+                return;
+            }
+
+            btn.disabled = true;
+            status.textContent = 'Uploading...';
+
+            try {
+                const form = new FormData();
+                form.append('name', name);
+                form.append('audio', fileInput.files[0]);
+
+                const res = await fetch('/api/pocket/clone', { method: 'POST', body: form });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Clone failed');
+
+                status.textContent = data.message || `Cloned! Voice "${data.name}" is now available.`;
+                fileInput.value = '';
+                document.getElementById('pocket-clone-name').value = '';
+
+                await loadVoices();
+            } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+            }
+            btn.disabled = false;
+        }
+
+        async function submitVoiceClone() {
+            const backendId = document.getElementById('clone-backend-select').value;
+            const name = document.getElementById('clone-voice-name').value.trim();
+            const fileInput = document.getElementById('clone-audio-file');
+            const status = document.getElementById('clone-status');
+            const btn = document.getElementById('clone-submit-btn');
+
+            if (!backendId || !name || !fileInput.files.length) {
+                status.textContent = 'Please fill in all fields.';
+                return;
+            }
+
+            btn.disabled = true;
+            status.textContent = 'Uploading and extracting embedding...';
+
+            try {
+                const form = new FormData();
+                form.append('backend_id', backendId);
+                form.append('name', name);
+                form.append('audio', fileInput.files[0]);
+
+                const res = await fetch('/api/docker/clone', { method: 'POST', body: form });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Clone failed');
+
+                status.textContent = `Cloned! Voice "${data.name}" is now available.`;
+                fileInput.value = '';
+                document.getElementById('clone-voice-name').value = '';
+
+                // Refresh voices so the cloned voice appears in the list
+                await refreshDockerBackend(backendId, btn);
+                await loadDockerBackends();
+            } catch (e) {
+                status.textContent = 'Error: ' + e.message;
+            }
+            btn.disabled = false;
+        }
+
+        async function startDockerBackend(id, btn) {
+            btn.disabled = true;
+            const row = document.querySelector(`[data-backend-id="${id}"]`);
+            const statusDot = row?.querySelector('.docker-backend-status');
+            if (statusDot) { statusDot.className = 'docker-backend-status starting'; }
+            try {
+                const res = await fetch(`/api/docker/backends/${id}/start`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Start failed');
+                await loadDockerBackends();
+                await loadVoices();
+            } catch (e) {
+                alert('Failed to start: ' + e.message);
+            }
+            btn.disabled = false;
+            if (statusDot) { statusDot.className = 'docker-backend-status stopped'; }
+            loadDockerBackends();
+        }
+
+        async function stopDockerBackend(id, btn) {
+            btn.disabled = true;
+            try {
+                const res = await fetch(`/api/docker/backends/${id}/stop`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Stop failed');
+                await loadDockerBackends();
+                await loadVoices();
+            } catch (e) {
+                alert('Failed to stop: ' + e.message);
+            }
+            btn.disabled = false;
+            loadDockerBackends();
+        }
+
+        async function refreshDockerBackend(id, btn) {
+            btn.disabled = true;
+            try {
+                await fetch(`/api/docker/backends/${id}/refresh`, { method: 'POST' });
+                await loadVoices();
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
         async function loadVoices() {
             try {
                 const response = await fetch('/api/voices');
@@ -987,6 +1219,13 @@
                     tabLabel: 'Piper (Offline Neural)',
                     sections: [
                         { key: 'piper_offline', label: '🐦 Piper (Offline Neural)', badge: 'neural', badgeText: 'Neural Offline' },
+                    ]
+                },
+                {
+                    tabId: 'pocket',
+                    tabLabel: 'Pocket TTS',
+                    sections: [
+                        { key: 'pocket_offline', label: '🎧 Pocket TTS (CPU TTS + Cloning)', badge: 'neural', badgeText: 'Pocket Offline' },
                     ]
                 },
                 {
@@ -1062,6 +1301,12 @@
             
             container.innerHTML = tabsHtml + contentHtml;
             document.getElementById('voice-count').textContent = `${totalVoices} voices`;
+
+            // Show Pocket clone section only when voice cloning model is available
+            const pocketSection = document.getElementById('pocket-clone-section');
+            if (pocketSection) {
+                pocketSection.style.display = voiceGroups.pocket_cloning ? '' : 'none';
+            }
         }
 
         function switchTab(tabId) {
@@ -1450,6 +1695,7 @@
         });
 
         loadVoices();
+        loadDockerBackends();
         browsePath('');
     </script>
 </body>

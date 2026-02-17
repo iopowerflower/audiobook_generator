@@ -34,6 +34,12 @@ try:
 except Exception:
     OrpheusCpp = None
 
+# Optional (Pocket TTS - Kyutai, lightweight CPU TTS with voice cloning)
+try:
+    from pocket_tts import TTSModel  # type: ignore
+except Exception:
+    TTSModel = None
+
 # Optional (Misaki G2P - better phonemization for Kokoro, used by HuggingFace demo)
 _MISAKI_G2P = None
 try:
@@ -42,16 +48,23 @@ try:
 except Exception:
     pass
 
-# Optional: Docker-based TTS backends (Kani, etc.)
-# These run in Docker containers and communicate via HTTP
-_DOCKER_BACKENDS = {}
-try:
-    from docker_backends.manager import DockerBackendManager, DockerBackendConfig
-    _DOCKER_BACKEND_MANAGER = DockerBackendManager()
-except ImportError:
-    _DOCKER_BACKEND_MANAGER = None
-
 app = Flask(__name__)
+
+# Docker-based TTS backends (Kani, etc.) - see docker_routes.py
+try:
+    from docker_routes import (
+        docker_bp,
+        is_docker_tts_voice,
+        synthesize_docker_tts_wav_bytes,
+        DOCKER_TTS_VOICES,
+        _DOCKER_BACKENDS,
+    )
+    app.register_blueprint(docker_bp)
+except ImportError:
+    DOCKER_TTS_VOICES = {}
+    _DOCKER_BACKENDS = {}
+    def is_docker_tts_voice(_): return False
+    def synthesize_docker_tts_wav_bytes(*_, **__): raise Exception("Docker routes not available")
 
 def _load_local_env_file() -> None:
     """
@@ -252,7 +265,7 @@ VOICES = build_voice_dict()
 KOKORO_VOICES = {}
 PIPER_VOICES = {}
 ORPHEUS_VOICES = {}
-DOCKER_TTS_VOICES = {}  # Voices from Docker backends (Kani, etc.)
+POCKET_VOICES = {}
 
 def _b64url_encode(s: str) -> str:
     return base64.urlsafe_b64encode(s.encode("utf-8")).decode("ascii").rstrip("=")
@@ -990,209 +1003,6 @@ def synthesize_orpheus_wav_bytes(text: str, voice_id: str, speaking_rate: float 
     return data
 
 
-# ---------------------------------------------------------------------------
-# Docker-based TTS Backends (Kani, etc.)
-# ---------------------------------------------------------------------------
-
-def is_docker_tts_voice(voice_id: str) -> bool:
-    """Check if a voice ID is from a Docker-based backend."""
-    return isinstance(voice_id, str) and voice_id.startswith("docker:")
-
-
-def register_docker_backend(backend_id: str, port: int, name: str = None):
-    """
-    Register a Docker TTS backend.
-    
-    The backend should be running and accessible at localhost:{port} with endpoints:
-      - GET /health
-      - GET /capabilities  
-      - GET /voices
-      - POST /synthesize
-      - POST /clone_voice (if voice cloning supported)
-    """
-    global DOCKER_TTS_VOICES
-    
-    if _DOCKER_BACKEND_MANAGER is None:
-        print(f"[docker] Backend manager not available, cannot register {backend_id}")
-        return False
-    
-    from docker_backends.manager import DockerBackendConfig
-    
-    config = DockerBackendConfig(
-        backend_id=backend_id,
-        name=name or backend_id.title(),
-        image=f"audiobook-{backend_id}:latest",
-        port=port,
-        gpu=False,  # Managed externally
-        health_endpoint="/health",
-        startup_timeout=60,
-    )
-    
-    backend = _DOCKER_BACKEND_MANAGER.register(config)
-    _DOCKER_BACKENDS[backend_id] = backend
-    
-    # Load voices if backend is available
-    if backend.is_available():
-        _refresh_docker_backend_voices(backend_id)
-        return True
-    else:
-        print(f"[docker] Backend {backend_id} registered but not available at port {port}")
-        return False
-
-
-def _refresh_docker_backend_voices(backend_id: str):
-    """Refresh voices from a Docker backend."""
-    global DOCKER_TTS_VOICES
-    
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend or not backend.is_available():
-        return
-    
-    try:
-        voices = backend.get_voices()
-        caps = backend.get_capabilities()
-        
-        for voice in voices:
-            # Create app voice ID: docker:{backend}:{voice_id}
-            app_voice_id = f"docker:{backend_id}:{voice.id}"
-            
-            DOCKER_TTS_VOICES[app_voice_id] = {
-                "name": voice.name,
-                "code": "docker",
-                "gender": voice.gender,
-                "type": f"{backend.name} (Docker)",
-                "desc": voice.description or f"From {backend.name}",
-                "region": f"🐳 {backend.name}",
-                "_backend_id": backend_id,
-                "_backend_voice_id": voice.id,
-                "_is_cloned": voice.is_cloned,
-                "_embedding": voice.embedding,
-                "_capabilities": caps,
-            }
-        
-        print(f"[docker] Loaded {len(voices)} voices from {backend_id}")
-    except Exception as e:
-        print(f"[docker] Failed to load voices from {backend_id}: {e}")
-
-
-def synthesize_docker_tts_wav_bytes(
-    text: str, 
-    voice_id: str, 
-    speaking_rate: float = 1.0,
-    custom_params: dict = None
-) -> bytes:
-    """Synthesize speech using a Docker-based TTS backend."""
-    if not is_docker_tts_voice(voice_id):
-        raise Exception("Invalid Docker TTS voice id")
-    
-    # Parse voice ID: docker:{backend_id}:{backend_voice_id}
-    parts = voice_id.split(":", 2)
-    if len(parts) != 3:
-        raise Exception(f"Invalid voice id format: {voice_id}")
-    
-    _, backend_id, backend_voice_id = parts
-    
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend:
-        raise Exception(f"Backend {backend_id} not registered")
-    
-    if not backend.is_available():
-        raise Exception(f"Backend {backend_id} is not running")
-    
-    # Get voice info for embedding (if cloned voice)
-    voice_info = DOCKER_TTS_VOICES.get(voice_id, {})
-    embedding = voice_info.get("_embedding")
-    
-    from docker_backends.interface import SynthesisRequest
-    
-    request = SynthesisRequest(
-        text=text,
-        voice_id=backend_voice_id,
-        speed=speaking_rate,
-        speaker_embedding=embedding,
-        custom_params=custom_params or {},
-    )
-    
-    response = backend.synthesize(request)
-    
-    # Ensure we return WAV bytes
-    if response.format == "wav":
-        return response.audio_bytes
-    else:
-        # Convert to WAV if needed (shouldn't happen with our backends)
-        import soundfile as sf
-        audio, sr = sf.read(io.BytesIO(response.audio_bytes))
-        buf = io.BytesIO()
-        sf.write(buf, audio, sr, format="WAV")
-        return buf.getvalue()
-
-
-def docker_clone_voice(backend_id: str, audio_bytes: bytes, name: str, sample_rate: int = 16000) -> dict:
-    """
-    Clone a voice using a Docker backend that supports voice cloning.
-    
-    Returns a dict with the new voice info (including embedding).
-    """
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend:
-        raise Exception(f"Backend {backend_id} not registered")
-    
-    caps = backend.get_capabilities()
-    if not caps.voice_cloning:
-        raise Exception(f"Backend {backend_id} does not support voice cloning")
-    
-    voice = backend.clone_voice(audio_bytes, name, sample_rate)
-    
-    # Register the cloned voice
-    app_voice_id = f"docker:{backend_id}:{voice.id}"
-    
-    DOCKER_TTS_VOICES[app_voice_id] = {
-        "name": voice.name,
-        "code": "docker",
-        "gender": voice.gender,
-        "type": f"{backend.name} (Cloned)",
-        "desc": "Cloned voice",
-        "region": f"🐳 {backend.name}",
-        "_backend_id": backend_id,
-        "_backend_voice_id": voice.id,
-        "_is_cloned": True,
-        "_embedding": voice.embedding,
-    }
-    
-    return {
-        "id": app_voice_id,
-        "name": voice.name,
-        "embedding": voice.embedding,
-    }
-
-
-# Try to connect to any pre-registered Docker backends on startup
-def _init_docker_backends():
-    """Check for running Docker backends and register them."""
-    # Check common ports for known backends
-    backends_to_check = [
-        ("kani", 7862, "Kani TTS"),
-        # Future backends can be added here
-        # ("f5tts", 7863, "F5-TTS"),
-    ]
-    
-    for backend_id, port, name in backends_to_check:
-        try:
-            # Quick health check
-            resp = requests.get(f"http://localhost:{port}/health", timeout=2)
-            if resp.status_code == 200:
-                print(f"[docker] Found {name} backend on port {port}")
-                register_docker_backend(backend_id, port, name)
-        except Exception:
-            pass  # Backend not running, that's fine
-
-# Initialize on module load (non-blocking, just checks)
-try:
-    _init_docker_backends()
-except Exception as e:
-    print(f"[docker] Backend initialization failed: {e}")
-
-
 def synthesize_google_mp3_bytes(text: str, voice_id: str, speaking_rate: float = 1.0) -> bytes:
     """Synthesize speech using Google Cloud TTS REST API (online)."""
     if not GOOGLE_API_KEY:
@@ -1363,12 +1173,251 @@ def synthesize_piper_wav_bytes(text: str, voice_id: str, speaking_rate: float = 
         raise Exception("Piper generated an empty/invalid WAV.")
     return data
 
+
+# =============================================================================
+# Pocket TTS (Kyutai - lightweight CPU TTS with voice cloning)
+# =============================================================================
+
+_POCKET_MODEL_LOCK = threading.Lock()
+_POCKET_MODEL = None
+_POCKET_VOICE_STATES: dict[str, object] = {}  # voice_id -> voice_state for caching
+
+# 8 built-in presets (no download needed)
+POCKET_PRESETS = [
+    ("alba", "Alba", "FEMALE", "Casual & Natural"),
+    ("marius", "Marius", "MALE", "Warm & Friendly"),
+    ("javert", "Javert", "MALE", "Deep & Authoritative"),
+    ("jean", "Jean", "MALE", "Calm & Steady"),
+    ("fantine", "Fantine", "FEMALE", "Soft & Gentle"),
+    ("cosette", "Cosette", "FEMALE", "Expressive"),
+    ("eponine", "Eponine", "FEMALE", "Clear & Bright"),
+    ("azelma", "Azelma", "FEMALE", "Youthful"),
+]
+
+# Curated HF voices (~50 representative across collections)
+# Format: (voice_id_suffix, display_name, gender, desc, hf_path)
+# voice-donations uses hash-style filenames; vctk/ears/expresso/alba-mackenna have known paths
+POCKET_HF_VOICES = [
+    # voice-donations (CC0) - verified paths from kyutai/tts-voices
+    ("hf:voice-donations/0a67.wav", "Donation 0a67", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/1410.wav", "Donation 1410", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/1dd0.wav", "Donation 1dd0", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/2181.wav", "Donation 2181", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/245e.wav", "Donation 245e", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/29da.wav", "Donation 29da", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/30c5.wav", "Donation 30c5", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/3973.wav", "Donation 3973", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/4189.wav", "Donation 4189", "UNKNOWN", "Voice donation (CC0)"),
+    ("hf:voice-donations/468c.wav", "Donation 468c", "UNKNOWN", "Voice donation (CC0)"),
+    # vctk (CC BY 4.0) - sample speakers
+    ("hf:vctk/p244_023.wav", "VCTK p244", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p262_023.wav", "VCTK p262", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p303_023.wav", "VCTK p303", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p225_023.wav", "VCTK p225", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p226_023.wav", "VCTK p226", "MALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p227_023.wav", "VCTK p227", "MALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p228_023.wav", "VCTK p228", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p229_023.wav", "VCTK p229", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p230_023.wav", "VCTK p230", "MALE", "VCTK speaker (CC BY 4.0)"),
+    ("hf:vctk/p231_023.wav", "VCTK p231", "FEMALE", "VCTK speaker (CC BY 4.0)"),
+    # ears (CC NC 4.0)
+    ("hf:ears/p010/freeform_speech_01.wav", "EARS p010", "MALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p011/freeform_speech_01.wav", "EARS p011", "FEMALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p012/freeform_speech_01.wav", "EARS p012", "MALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p013/freeform_speech_01.wav", "EARS p013", "FEMALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p014/freeform_speech_01.wav", "EARS p014", "MALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p015/freeform_speech_01.wav", "EARS p015", "FEMALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p016/freeform_speech_01.wav", "EARS p016", "MALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p017/freeform_speech_01.wav", "EARS p017", "FEMALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p018/freeform_speech_01.wav", "EARS p018", "MALE", "EARS speaker (CC NC 4.0)"),
+    ("hf:ears/p019/freeform_speech_01.wav", "EARS p019", "FEMALE", "EARS speaker (CC NC 4.0)"),
+    # expresso (CC NC 4.0) - emotional (paths verified from kyutai/tts-voices)
+    ("hf:expresso/ex01-ex02_default_001_channel2_198s.wav", "Expresso default", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex03-ex01_confused_001_channel1_909s.wav", "Expresso confused", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex03-ex01_happy_001_channel1_334s.wav", "Expresso happy", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex03-ex01_calm_001_channel1_1143s.wav", "Expresso calm", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex03-ex01_angry_001_channel1_201s.wav", "Expresso angry", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex03-ex01_disgusted_004_channel1_170s.wav", "Expresso disgusted", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex01-ex02_whisper_001_channel1_579s.wav", "Expresso whisper", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex01-ex02_enunciated_001_channel1_432s.wav", "Expresso enunciated", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex01-ex02_fast_001_channel1_104s.wav", "Expresso fast", "FEMALE", "Expresso (CC NC 4.0)"),
+    ("hf:expresso/ex01-ex02_projected_001_channel1_46s.wav", "Expresso projected", "FEMALE", "Expresso (CC NC 4.0)"),
+    # alba-mackenna (CC BY 4.0) - character voices (paths verified)
+    ("hf:alba-mackenna/casual.wav", "Alba casual", "FEMALE", "Alba MacKenna (CC BY 4.0)"),
+    ("hf:alba-mackenna/announcer.wav", "Alba announcer", "FEMALE", "Alba MacKenna (CC BY 4.0)"),
+    ("hf:alba-mackenna/merchant.wav", "Alba merchant", "FEMALE", "Alba MacKenna (CC BY 4.0)"),
+    ("hf:alba-mackenna/a-moment-by.wav", "Alba a-moment-by", "FEMALE", "Alba MacKenna (CC BY 4.0)"),
+]
+
+
+def get_pocket_model():
+    """Lazy-load Pocket TTS model (singleton)."""
+    global _POCKET_MODEL
+    if TTSModel is None:
+        raise Exception("Pocket TTS is unavailable (pocket-tts not installed).")
+    with _POCKET_MODEL_LOCK:
+        if _POCKET_MODEL is None:
+            _POCKET_MODEL = TTSModel.load_model()
+        return _POCKET_MODEL
+
+
+def pocket_cloning_ok() -> bool:
+    """Check if the loaded Pocket TTS model supports voice cloning.
+
+    The cloning-capable model variant is gated on HuggingFace.  If the user
+    hasn't accepted the terms + logged in, ``load_model()`` silently falls
+    back to the non-cloning variant which sets ``has_voice_cloning = False``.
+    """
+    try:
+        return get_pocket_model().has_voice_cloning
+    except Exception:
+        return False
+
+
+def build_pocket_voice_dict() -> dict:
+    """Build voice dict for Pocket TTS.
+
+    Always includes the 8 built-in presets.
+    HF voices and cloned voices only appear when the voice-cloning model
+    is accessible (requires accepting HF terms + ``huggingface-cli login``).
+    """
+    if TTSModel is None:
+        return {}
+    voices = {}
+    # 8 presets — always work, no auth needed
+    for preset_id, name, gender, desc in POCKET_PRESETS:
+        voice_id = f"pocket:{preset_id}"
+        voices[voice_id] = {
+            "name": name,
+            "code": "local",
+            "gender": gender,
+            "type": "Pocket TTS (Offline)",
+            "desc": desc,
+            "region": "🎧 Pocket TTS",
+            "_pocket_prompt": preset_id,
+        }
+    # HF voices + clones — only when the cloning model is available
+    if pocket_cloning_ok():
+        for suffix, name, gender, desc in POCKET_HF_VOICES:
+            voice_id = f"pocket:{suffix}"
+            hf_path = f"hf://kyutai/tts-voices/{suffix.replace('hf:', '')}"
+            voices[voice_id] = {
+                "name": name,
+                "code": "hf",
+                "gender": gender,
+                "type": "Pocket TTS (Offline)",
+                "desc": desc,
+                "region": "🎧 Pocket TTS",
+                "_pocket_prompt": hf_path,
+            }
+        clones_dir = Path(__file__).resolve().parent / "models" / "pocket" / "clones"
+        if clones_dir.exists():
+            for f in sorted(clones_dir.iterdir()):
+                if f.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg"):
+                    voice_id = f"pocket:clone:{f.name}"
+                    voices[voice_id] = {
+                        "name": f.stem,
+                        "code": "clone",
+                        "gender": "UNKNOWN",
+                        "type": "Pocket TTS (Offline)",
+                        "desc": "Cloned from your audio",
+                        "region": "🎧 Pocket TTS",
+                        "_pocket_prompt": str(f),
+                    }
+    return voices
+
+
+def _ensure_pocket_voice_state(voice_id: str, prompt: str) -> object:
+    """Get or compute voice state for a given voice_id and prompt. Caches in _POCKET_VOICE_STATES."""
+    if voice_id in _POCKET_VOICE_STATES:
+        return _POCKET_VOICE_STATES[voice_id]
+    model = get_pocket_model()
+    state = model.get_state_for_audio_prompt(prompt)
+    _POCKET_VOICE_STATES[voice_id] = state
+    return state
+
+
+def is_pocket_voice(voice_id: str) -> bool:
+    return isinstance(voice_id, str) and voice_id.startswith("pocket:")
+
+
+def synthesize_pocket_wav_bytes(text: str, voice_id: str, speaking_rate: float = 1.0) -> bytes:
+    """Synthesize speech with Pocket TTS. Returns WAV bytes."""
+    if not is_pocket_voice(voice_id):
+        raise Exception("Invalid Pocket TTS voice id")
+    suffix = voice_id.split("pocket:", 1)[1]
+    # pocket:clone:<filename> -> load from models/pocket/clones/<filename>
+    if suffix.startswith("clone:"):
+        filename = suffix.split("clone:", 1)[1]
+        base = Path(__file__).resolve().parent / "models" / "pocket" / "clones"
+        prompt = str(base / filename)
+        if not os.path.exists(prompt):
+            raise FileNotFoundError(f"Cloned voice file not found: {prompt}")
+    elif suffix.startswith("hf:"):
+        prompt = f"hf://kyutai/tts-voices/{suffix[3:]}"
+    else:
+        prompt = suffix  # preset name (alba, marius, etc.)
+    voice_state = _ensure_pocket_voice_state(voice_id, prompt)
+    model = get_pocket_model()
+    # Chunk long text for stability (similar to Kokoro)
+    try:
+        chunk_chars = int(os.environ.get("POCKET_CHUNK_CHARS", "1000"))
+    except Exception:
+        chunk_chars = 1000
+    chunks = split_text_into_chunks(text, chunk_chars) if len(text) > chunk_chars else [text]
+    parts = []
+    for ch in chunks:
+        if not ch.strip():
+            continue
+        audio = model.generate_audio(voice_state, ch)
+        arr = audio.cpu().numpy() if hasattr(audio, "cpu") else audio
+        if hasattr(arr, "numpy"):
+            arr = arr.numpy()
+        parts.append(arr)
+    if not parts:
+        raise Exception("No audio generated.")
+    import numpy as _np
+    audio_concat = _np.concatenate(parts)
+    buf = io.BytesIO()
+    sf.write(buf, audio_concat, model.sample_rate, format="WAV")
+    data = buf.getvalue()
+    if len(data) < MIN_VALID_AUDIO_BYTES:
+        raise Exception("Pocket TTS generated empty/invalid WAV.")
+    return data
+
+
+POCKET_VOICES = build_pocket_voice_dict()
+
+
+def refresh_pocket_clones() -> None:
+    """Re-scan models/pocket/clones/ and update POCKET_VOICES with any new cloned voices."""
+    if not pocket_cloning_ok():
+        return
+    clones_dir = Path(__file__).resolve().parent / "models" / "pocket" / "clones"
+    if clones_dir.exists():
+        for f in sorted(clones_dir.iterdir()):
+            if f.suffix.lower() in (".wav", ".mp3", ".flac", ".ogg"):
+                voice_id = f"pocket:clone:{f.name}"
+                if voice_id not in POCKET_VOICES:
+                    POCKET_VOICES[voice_id] = {
+                        "name": f.stem,
+                        "code": "clone",
+                        "gender": "UNKNOWN",
+                        "type": "Pocket TTS (Offline)",
+                        "desc": "Cloned from your audio",
+                        "region": "🎧 Pocket TTS",
+                        "_pocket_prompt": str(f),
+                    }
+
+
 def synthesize_speech(text: str, voice_id: str, speaking_rate: float = 1.0):
     """
     Returns: (audio_bytes, mimetype, extension)
     """
     text = apply_pronunciation_overrides(text)
     text = apply_inline_pronunciation_markup(text)
+    if is_pocket_voice(voice_id):
+        return synthesize_pocket_wav_bytes(text, voice_id, speaking_rate), "audio/wav", ".wav"
     if is_kokoro_voice(voice_id):
         return synthesize_kokoro_wav_bytes(text, voice_id, speaking_rate), "audio/wav", ".wav"
     if is_piper_voice(voice_id):
@@ -1467,6 +1516,18 @@ def list_voices():
             'region': voice_info.get('region', '🐳 Docker')
         })
 
+    # Add Pocket TTS voices (Kyutai - CPU TTS with voice cloning) if available
+    for voice_id, voice_info in POCKET_VOICES.items():
+        voices.append({
+            'id': voice_id,
+            'name': voice_info['name'],
+            'gender': voice_info.get('gender', 'UNKNOWN'),
+            'type': voice_info['type'],
+            'desc': voice_info['desc'],
+            'code': voice_info.get('code', 'local'),
+            'region': voice_info.get('region', '🎧 Pocket TTS')
+        })
+
     # Group voices
     grouped = {
         'chirp3_us': [v for v in voices if v['type'] == 'Chirp3-HD' and v['code'] == 'en-US'],
@@ -1479,15 +1540,56 @@ def list_voices():
         'kokoro_offline': [v for v in voices if v['type'] == 'Kokoro (Offline)'],
         'piper_offline': [v for v in voices if v['type'] == 'Piper (Offline)'],
         'orpheus_offline': [v for v in voices if v['type'] == 'Orpheus (Offline)'],
+        'pocket_offline': [v for v in voices if v['type'] == 'Pocket TTS (Offline)'],
         'docker_tts': [v for v in voices if v['code'] == 'docker'],
+        'pocket_cloning': pocket_cloning_ok(),
     }
     
     return jsonify(grouped)
 
+
+@app.route("/api/pocket/clone", methods=["POST"])
+def pocket_clone_voice():
+    """Upload audio to clone a voice for Pocket TTS. Saves to models/pocket/clones/."""
+    if TTSModel is None:
+        return jsonify({"error": "Pocket TTS is not installed"}), 503
+    if not pocket_cloning_ok():
+        return jsonify({"error": "Voice cloning requires HF auth. Run: huggingface-cli login"}), 503
+    name = request.form.get("name", "").strip()
+    audio_file = request.files.get("audio")
+    if not name or not audio_file:
+        return jsonify({"error": "Missing: name, audio"}), 400
+    # Sanitize filename
+    safe_name = re.sub(r"[^\w\-.]", "_", name)[:64]
+    if not safe_name:
+        safe_name = "clone"
+    ext = Path(audio_file.filename or "").suffix.lower() or ".wav"
+    if ext not in (".wav", ".mp3", ".flac", ".ogg"):
+        ext = ".wav"
+    filename = f"{safe_name}{ext}"
+    clones_dir = Path(__file__).resolve().parent / "models" / "pocket" / "clones"
+    clones_dir.mkdir(parents=True, exist_ok=True)
+    target = clones_dir / filename
+    try:
+        data = audio_file.read()
+        if len(data) < 8000:  # ~0.5s at 16kHz
+            return jsonify({"error": "Audio too short (need at least ~1 second)"}), 400
+        atomic_write_bytes(target, data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    voice_id = f"pocket:clone:{filename}"
+    refresh_pocket_clones()
+    return jsonify({
+        "voice_id": voice_id,
+        "name": safe_name,
+        "message": f'Cloned voice "{safe_name}" is now available.',
+    })
+
+
 @app.route('/api/preview/<path:voice_id>')
 def preview_voice(voice_id):
     """Generate a voice preview"""
-    if voice_id not in VOICES and voice_id not in KOKORO_VOICES and voice_id not in PIPER_VOICES and voice_id not in ORPHEUS_VOICES and voice_id not in DOCKER_TTS_VOICES:
+    if voice_id not in VOICES and voice_id not in KOKORO_VOICES and voice_id not in PIPER_VOICES and voice_id not in ORPHEUS_VOICES and voice_id not in DOCKER_TTS_VOICES and voice_id not in POCKET_VOICES:
         return jsonify({'error': 'Voice not found'}), 404
     
     # Preview uses the same sample text every time; cache on disk for speed/cost.
@@ -1707,7 +1809,7 @@ def convert_single_file(input_path, output_path, voice_id, speaking_rate):
         raise ValueError("File is empty")
     
     # Offline voices: generate as a single WAV (no API limits)
-    if is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id):
+    if is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id) or is_pocket_voice(voice_id):
         audio_content, _mimetype, _ext = synthesize_speech(text, voice_id, speaking_rate)
         with open(output_path, "wb") as f:
             f.write(audio_content)
@@ -1786,7 +1888,7 @@ def process_single_file_wrapper(args):
     """Wrapper for parallel file processing"""
     file_path, output_folder, voice_id, speaking_rate = args
     filename = os.path.basename(file_path)
-    output_ext = ".wav" if (is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id) or is_docker_tts_voice(voice_id)) else ".mp3"
+    output_ext = ".wav" if (is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id) or is_pocket_voice(voice_id) or is_docker_tts_voice(voice_id)) else ".mp3"
     output_name = os.path.splitext(filename)[0] + output_ext
     output_path = os.path.join(output_folder, output_name)
     
@@ -1804,7 +1906,7 @@ def convert_files_thread(files, voice_id, output_folder, speaking_rate):
         # File-level parallelism:
         # - For Google voices: default 2 (avoid API throttling)
         # - For offline voices (Kokoro/Piper/Orpheus/Docker): default 1 (avoid CPU oversubscription / GPU contention)
-        is_offline = is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id) or is_docker_tts_voice(voice_id)
+        is_offline = is_kokoro_voice(voice_id) or is_piper_voice(voice_id) or is_orpheus_voice(voice_id) or is_pocket_voice(voice_id) or is_docker_tts_voice(voice_id)
         default_workers = "1" if is_offline else "2"
         env_key = "OFFLINE_FILE_WORKERS" if is_offline else "GOOGLE_FILE_WORKERS"
         try:
@@ -1857,143 +1959,14 @@ def cancel_conversion():
     return jsonify({'status': 'cancelling'})
 
 
-# ---------------------------------------------------------------------------
-# Docker Backend API endpoints
-# ---------------------------------------------------------------------------
-
-@app.route('/api/docker/backends')
-def list_docker_backends():
-    """List registered Docker TTS backends and their status."""
-    backends = []
-    for backend_id, backend in _DOCKER_BACKENDS.items():
-        backends.append({
-            'id': backend_id,
-            'name': backend.name,
-            'port': backend.config.port,
-            'available': backend.is_available(),
-            'voice_count': len([v for v in DOCKER_TTS_VOICES if v.startswith(f"docker:{backend_id}:")]),
-        })
-    return jsonify({'backends': backends})
-
-
-@app.route('/api/docker/backends/<backend_id>/capabilities')
-def get_docker_backend_capabilities(backend_id):
-    """Get capabilities of a Docker backend."""
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend:
-        return jsonify({'error': f'Backend {backend_id} not found'}), 404
-    
-    if not backend.is_available():
-        return jsonify({'error': f'Backend {backend_id} is not running'}), 503
-    
-    caps = backend.get_capabilities()
-    return jsonify({
-        'has_predefined_voices': caps.has_predefined_voices,
-        'voice_cloning': caps.voice_cloning,
-        'voice_cloning_formats': caps.voice_cloning_formats,
-        'emotion_tags': caps.emotion_tags,
-        'emotion_options': caps.emotion_options,
-        'streaming': caps.streaming,
-        'sample_rate': caps.sample_rate,
-        'multilingual': caps.multilingual,
-        'languages': caps.languages,
-        'speaker_embedding': caps.speaker_embedding,
-        'embedding_dim': caps.embedding_dim,
-        'custom_params': caps.custom_params,
-    })
-
-
-@app.route('/api/docker/backends/<backend_id>/refresh', methods=['POST'])
-def refresh_docker_backend_voices(backend_id):
-    """Refresh voices from a Docker backend."""
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend:
-        return jsonify({'error': f'Backend {backend_id} not found'}), 404
-    
-    if not backend.is_available():
-        return jsonify({'error': f'Backend {backend_id} is not running'}), 503
-    
-    _refresh_docker_backend_voices(backend_id)
-    voice_count = len([v for v in DOCKER_TTS_VOICES if v.startswith(f"docker:{backend_id}:")])
-    
-    return jsonify({'status': 'ok', 'voice_count': voice_count})
-
-
-@app.route('/api/docker/clone', methods=['POST'])
-def clone_voice_endpoint():
-    """
-    Clone a voice using a Docker backend.
-    
-    Expects multipart form data:
-      - backend_id: ID of the Docker backend to use
-      - name: Name for the cloned voice
-      - audio: Audio file to clone from (WAV, MP3, etc.)
-    """
-    backend_id = request.form.get('backend_id')
-    name = request.form.get('name')
-    audio_file = request.files.get('audio')
-    
-    if not backend_id or not name or not audio_file:
-        return jsonify({'error': 'Missing required fields: backend_id, name, audio'}), 400
-    
-    backend = _DOCKER_BACKENDS.get(backend_id)
-    if not backend:
-        return jsonify({'error': f'Backend {backend_id} not found'}), 404
-    
-    if not backend.is_available():
-        return jsonify({'error': f'Backend {backend_id} is not running'}), 503
-    
-    caps = backend.get_capabilities()
-    if not caps.voice_cloning:
-        return jsonify({'error': f'Backend {backend_id} does not support voice cloning'}), 400
-    
-    try:
-        audio_bytes = audio_file.read()
-        result = docker_clone_voice(backend_id, audio_bytes, name)
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/docker/register', methods=['POST'])
-def register_docker_backend_endpoint():
-    """
-    Manually register a Docker backend.
-    
-    JSON body:
-      - backend_id: Unique ID for the backend
-      - port: Port the backend is running on
-      - name: Display name (optional)
-    """
-    data = request.get_json()
-    if not data:
-        return jsonify({'error': 'Missing JSON body'}), 400
-    
-    backend_id = data.get('backend_id')
-    port = data.get('port')
-    name = data.get('name')
-    
-    if not backend_id or not port:
-        return jsonify({'error': 'Missing required fields: backend_id, port'}), 400
-    
-    try:
-        success = register_docker_backend(backend_id, int(port), name)
-        if success:
-            voice_count = len([v for v in DOCKER_TTS_VOICES if v.startswith(f"docker:{backend_id}:")])
-            return jsonify({'status': 'ok', 'voice_count': voice_count})
-        else:
-            return jsonify({'error': f'Backend registered but not available on port {port}'}), 503
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 if __name__ == '__main__':
     print("\n" + "="*50)
     print("  AUDIOBOOK GENERATOR")
     print("  Powered by Google Cloud TTS")
     print(f"  {len(VOICES)} cloud voices (incl. Chirp3-HD)")
     print(f"  {len(KOKORO_VOICES)} Kokoro voices, {len(PIPER_VOICES)} Piper voices")
-    print(f"  {len(ORPHEUS_VOICES)} Orpheus voices, {len(DOCKER_TTS_VOICES)} Docker TTS voices")
+    print(f"  {len(ORPHEUS_VOICES)} Orpheus voices, {len(POCKET_VOICES)} Pocket TTS voices")
+    print(f"  {len(DOCKER_TTS_VOICES)} Docker TTS voices")
     if _DOCKER_BACKENDS:
         print(f"  Docker backends: {', '.join(_DOCKER_BACKENDS.keys())}")
     print("  Open http://localhost:5000 in your browser")

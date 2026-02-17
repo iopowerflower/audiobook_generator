@@ -1,13 +1,9 @@
-# Lightweight Gradio Proxy
-#
-# This is a tiny container that proxies requests to the HuggingFace Space
-# Docker image. It translates our REST API to Gradio API calls.
+# Lightweight Gradio Proxy for Kani TTS 2 - Multilingual (kani-pt)
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies
 RUN pip install --no-cache-dir \
     fastapi \
     uvicorn[standard] \

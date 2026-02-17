@@ -62,6 +62,11 @@ class DockerTTSBackend(TTSBackend):
         except Exception:
             return False
     
+    def invalidate_cache(self) -> None:
+        """Clear cached capabilities and voices so the next call re-fetches."""
+        self._capabilities = None
+        self._voices = None
+
     def get_capabilities(self) -> TTSCapabilities:
         """Get capabilities from the backend."""
         if self._capabilities is not None:
